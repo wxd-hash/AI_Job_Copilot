@@ -1,0 +1,38 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 222.2 84% 4.9%;
+    --card: 0 0% 100%;
+    --card-foreground: 222.2 84% 4.9%;
+    --border: 214.3 31.8% 91.4%;
+    --ring: 221.2 83.2% 53.3%;
+  }
+
+  body {
+    @apply bg-gray-50 text-gray-900 antialiased;
+  }
+}
+
+@layer components {
+  .score-ring {
+    @apply relative inline-flex items-center justify-center
+           w-32 h-32 rounded-full;
+    background: conic-gradient(
+      theme("colors.primary.500") calc(var(--score) * 1%),
+      theme("colors.gray.200") 0
+    );
+  }
+
+  .score-ring::before {
+    content: "";
+    @apply absolute inset-2 bg-white rounded-full;
+  }
+
+  .score-value {
+    @apply relative z-10 text-2xl font-bold text-primary-700;
+  }
+}

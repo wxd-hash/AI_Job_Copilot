@@ -1,0 +1,24 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(E:\\\\AI_Job_Copilot\\\\.venv\\\\Scripts\\\\python.exe *)",
+      "Bash(\"E:\\\\AI_Job_Copilot\\\\.venv\\\\Scripts\\\\pip.exe\" list *)",
+      "Bash(\"E:/AI_Job_Copilot/.venv/Scripts/pip.exe\" list *)",
+      "Bash(/e/AI_Job_Copilot/.venv/Scripts/python.exe -m pip list)",
+      "Bash(uv --version)",
+      "Bash(uv sync *)",
+      "Bash(/e/AI_Job_Copilot/.venv/Scripts/python.exe *)",
+      "Bash(curl -s http://localhost:8000/health)",
+      "Bash(curl -s http://localhost:8000/)",
+      "Bash(npm --version)",
+      "Bash(npm install *)",
+      "Bash(npx next *)",
+      "Bash(curl -s http://localhost:3000)",
+      "Bash(PYTHONPATH=/e/AI_Job_Copilot /e/AI_Job_Copilot/.venv/Scripts/python.exe *)",
+      "Bash(npm run *)",
+      "Bash(uv add *)",
+      "Bash(git add *)",
+      "Bash(git commit -m 'feat: AI Job Copilot - multi-agent resume analysis system *)"
+    ]
+  }
+}

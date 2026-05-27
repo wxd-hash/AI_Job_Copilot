@@ -1,0 +1,42 @@
+# 环境变量（包含密钥）
+.env
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+*.egg-info/
+dist/
+
+# Node
+node_modules/
+.next/
+out/
+
+# 数据库
+*.db
+
+# 测试输出
+tests/*_output.json
+
+# 临时文件
+tmp/
+temp/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# LangSmith
+.langsmith/
+
+# Playwright
+ms-playwright/
+
+# 简历文件（个人隐私）
+*.pdf
