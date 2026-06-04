@@ -38,5 +38,8 @@ Thumbs.db
 # Playwright
 ms-playwright/
 
+# Claude Code
+.claude/
+
 # 简历文件（个人隐私）
 *.pdf
