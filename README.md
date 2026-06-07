@@ -9,6 +9,7 @@
 | 层 | 技术 |
 |---|---|
 | LLM | 阿里云 DashScope — qwen-turbo / qwen-plus（三级模型分配） |
+| LLM 封装 | LangChain（ChatPromptTemplate + BaseChatModel + LCEL） |
 | 编排 | LangGraph 状态图工作流（两层并行执行） |
 | 后端 | Python 3.11+ / FastAPI / Pydantic / SQLite |
 | 前端 | Next.js 15 (App Router) / TailwindCSS / React 19 |
@@ -20,7 +21,8 @@
 ```
 AI_Job_Copilot/
 ├── backend/
-│   ├── agents/               # 5 个独立 Agent
+│   ├── agents/               # 5 个 Agent（全部 LangChain 封装）
+│   │   ├── llm.py             #   DashScopeChatModel（LangChain BaseChatModel）
 │   │   ├── resume_parser.py  #   简历解析（PDF → 结构化 JSON，qwen-turbo）
 │   │   ├── jd_analyzer.py    #   职位分析（JD → 关键词/技能/级别，qwen-turbo）
 │   │   ├── ats_scorer.py     #   ATS 评分（0-100 + 四维拆解，qwen-plus）
@@ -153,8 +155,15 @@ uv run python tests/test_phase5.py              # FastAPI 端点
 | Rewrite Agent | qwen-plus | qwen-plus | 简历 + JD + ATS | 优化 bullet + 技能缺口计划 |
 | Interview Agent | qwen-plus | qwen-plus | 简历 + JD + ATS | 行为/技术/情景/缺口面试题 |
 
-每个 Agent 均包含：
+每个 Agent 均使用 **LangChain LCEL 模式**：
 
+```python
+model = DashScopeChatModel(model="qwen-plus")
+chain = ChatPromptTemplate.from_template(EXTRACTION_PROMPT) | model | StrOutputParser()
+raw_output = chain.invoke({"resume_text": text})
+```
+
+- `DashScopeChatModel` — 继承 `BaseChatModel`，将 DashScope API 封装为 LangChain 原生模型
 - JSON 解析失败自动重试（最多 2 次，用更强模型修复）
 - 结构化日志（`@log_agent_execution` 装饰器，记录耗时和状态）
 - Pydantic 输出强校验（`None` 自动兜底为空字符串）

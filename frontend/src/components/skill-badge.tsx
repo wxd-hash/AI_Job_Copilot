@@ -13,7 +13,6 @@ export function SkillBadge({ skill, variant }: SkillBadgeProps) {
 
   return (
     <span className={`${base} ${styles}`}>
-      {variant === "matched" ? "+ " : "- "}
       {skill}
     </span>
   );

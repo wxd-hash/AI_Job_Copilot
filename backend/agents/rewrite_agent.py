@@ -2,19 +2,16 @@ import json
 import re
 from typing import Optional
 
-import dashscope
-from dashscope import Generation
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.output_parsers import StrOutputParser
 
 from backend.core.config import settings
 from backend.core.logger import setup_logger, log_agent_execution
+from backend.agents.llm import DashScopeChatModel
 from backend.schemas.resume import Resume
 from backend.schemas.jd import JobDescription
 from backend.schemas.ats import ATSScore
-from backend.schemas.rewrite import (
-    RewrittenResume,
-    RewrittenBullet,
-    SkillGapAction,
-)
+from backend.schemas.rewrite import RewrittenResume, RewrittenBullet, SkillGapAction
 
 logger = setup_logger("agent.rewrite")
 
@@ -93,49 +90,19 @@ def _extract_json_from_text(text: str) -> Optional[dict]:
     return None
 
 
-def _call_qwen(prompt: str, model: str | None = None) -> str:
-    dashscope.api_key = settings.DASHSCOPE_API_KEY
-    model = model or settings.MODEL_NAME_COMPLEX
-    response = Generation.call(
-        model=model,
-        messages=[{"role": "user", "content": prompt}],
-        result_format="message",
-    )
-    if response.status_code != 200:
-        raise RuntimeError(
-            f"DashScope API error: code={response.code}, message={response.message}"
-        )
-    return response.output.choices[0].message.content
-
-
 @log_agent_execution("rewrite_agent")
 def rewrite_resume(
-    resume: Resume,
-    jd: JobDescription,
-    ats: ATSScore,
-    max_retries: int = 2,
+    resume: Resume, jd: JobDescription, ats: ATSScore, max_retries: int = 2
 ) -> RewrittenResume:
-    """
-    Generate ATS-optimized resume rewrite suggestions using Qwen-Max.
-
-    Args:
-        resume: Parsed Resume object.
-        jd: Parsed JobDescription object.
-        ats: ATS match analysis with missing skills.
-        max_retries: Maximum JSON parse retries.
-
-    Returns:
-        Validated RewrittenResume with improved bullets and gap plan.
-    """
     resume_json = resume.model_dump_json(exclude_none=True, indent=2)
     jd_json = jd.model_dump_json(exclude={"raw_text"}, exclude_none=True, indent=2)
     ats_json = ats.model_dump_json(exclude_none=True, indent=2)
 
-    prompt = REWRITE_PROMPT.format(
-        resume_json=resume_json, jd_json=jd_json, ats_json=ats_json
-    )
-    raw_output = _call_qwen(prompt, model=settings.MODEL_NAME_COMPLEX)
-    logger.info("Qwen-Max response received, length=%d", len(raw_output))
+    model = DashScopeChatModel(model=settings.MODEL_NAME_COMPLEX, temperature=0.1)
+    chain = ChatPromptTemplate.from_template(REWRITE_PROMPT) | model | StrOutputParser()
+
+    raw_output = chain.invoke({"resume_json": resume_json, "jd_json": jd_json, "ats_json": ats_json})
+    logger.info("Qwen response received, length=%d", len(raw_output))
 
     data = _extract_json_from_text(raw_output)
 
@@ -143,25 +110,21 @@ def rewrite_resume(
         if data is not None:
             break
         logger.warning("JSON parse failed, retry %d/%d", attempt + 1, max_retries)
-        fix_prompt = FIX_JSON_PROMPT.format(raw_text=raw_output)
-        raw_output = _call_qwen(fix_prompt, model=settings.MODEL_NAME_COMPLEX)
+        fix_model = DashScopeChatModel(model=settings.MODEL_NAME_COMPLEX, temperature=0.1)
+        fix_chain = ChatPromptTemplate.from_template(FIX_JSON_PROMPT) | fix_model | StrOutputParser()
+        raw_output = fix_chain.invoke({"raw_text": raw_output})
         data = _extract_json_from_text(raw_output)
 
     if data is None:
-        raise ValueError(
-            f"Failed to parse rewrite JSON after {max_retries} retries"
-        )
+        raise ValueError(f"Failed to parse rewrite JSON after {max_retries} retries")
 
-    # Normalize nested objects
     if "improved_bullets" in data:
         data["improved_bullets"] = [
-            RewrittenBullet(**b) if isinstance(b, dict) else b
-            for b in data["improved_bullets"]
+            RewrittenBullet(**b) if isinstance(b, dict) else b for b in data["improved_bullets"]
         ]
     if "skill_gap_plan" in data:
         data["skill_gap_plan"] = [
-            SkillGapAction(**s) if isinstance(s, dict) else s
-            for s in data["skill_gap_plan"]
+            SkillGapAction(**s) if isinstance(s, dict) else s for s in data["skill_gap_plan"]
         ]
 
     return RewrittenResume(**data)

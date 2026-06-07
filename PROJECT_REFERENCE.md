@@ -196,52 +196,71 @@ PDF 文本提取，使用 PyMuPDF (`fitz`) 库。
 
 ## 五、backend/agents/ — AI Agent
 
-每个 Agent 文件均包含：Prompt 模板、JSON 修复 Prompt、JSON 提取函数、Qwen 调用函数、主 Agent 函数。
+所有 Agent 使用 **LangChain LCEL 模式**封装 DashScope 调用：
+
+```python
+model = DashScopeChatModel(model="qwen-plus")
+chain = ChatPromptTemplate.from_template(PROMPT) | model | StrOutputParser()
+raw_output = chain.invoke({...})
+```
+
+每个 Agent 文件包含：Prompt 模板、JSON 修复 Prompt、JSON 提取函数、主 Agent 函数。
+
+### backend/agents/llm.py
+
+**LangChain 兼容层**。将 DashScope Generation API 封装为 `BaseChatModel` 子类。
+
+**`class DashScopeChatModel(BaseChatModel)`**：
+
+- `model: str` — 模型名（qwen-turbo / qwen-plus 等）
+- `temperature: float` — 温度参数，默认 0.1
+- `_generate(messages, ...) -> ChatResult` — 核心方法。将 LangChain 消息（SystemMessage / HumanMessage / AIMessage）转换为 DashScope 消息格式，调用 `Generation.call()`，返回 `ChatResult`
+- `_llm_type` — 返回 `"dashscope-{model}"`
+- 自动从 `settings.DASHSCOPE_API_KEY` 初始化 API key
 
 ### backend/agents/resume_parser.py
 
 **简历解析 Agent**。模型：`qwen-turbo`（重试用 `qwen-plus`）。
 
-- `RESUME_EXTRACTION_PROMPT` — 系统提示词。要求 LLM 从简历文本提取 contact / summary / skills / experience / projects / education 等字段的 JSON。占位符 `{resume_text}`
-- `FIX_JSON_PROMPT` — JSON 修复提示词。LLM 返回的 JSON 无法解析时，用此提示词让更强模型修复。占位符 `{raw_text}`
-- `_extract_json_from_text(text: str) -> dict | None` — 从 LLM 返回文本中提取 JSON。依次尝试：直接解析 → 提取 markdown 代码块 → 正则匹配大括号
-- `_call_qwen(prompt: str, model: str | None) -> str` — 调用 DashScope Qwen 模型。设置 API key，发送消息，检查状态码，返回响应文本
-- `parse_resume(resume_text: str, max_retries: int = 2) -> Resume` — **主函数**。截断超长文本到 12000 字，调用 Qwen 提取，解析 JSON，失败则用 `qwen-plus` 重试最多 2 次，返回 `Resume` 对象
-- `parse_resume_from_pdf(pdf_path: str) -> Resume` — 便捷函数。先调 `extract_text_from_pdf` 再调 `parse_resume`
+- `RESUME_EXTRACTION_PROMPT` — ChatPromptTemplate 模板。占位符 `{resume_text}`
+- `FIX_JSON_PROMPT` — JSON 修复模板。占位符 `{raw_text}`
+- `_extract_json_from_text(text) -> dict | None` — 从 LLM 返回文本提取 JSON（直接解析 → markdown 代码块 → 正则匹配）
+- `parse_resume(resume_text, max_retries=2) -> Resume` — **主函数**。构建链 `prompt | DashScopeChatModel | StrOutputParser()`，失败用 qwen-plus 重试
+- `parse_resume_from_pdf(pdf_path) -> Resume` — 先调 `extract_text_from_pdf` 再调 `parse_resume`
 
 ### backend/agents/jd_analyzer.py
 
 **JD 分析 Agent**。模型：`qwen-turbo`（重试用 `qwen-plus`）。
 
-- `JD_EXTRACTION_PROMPT` — 提示词模板。提取职位名称 / 级别 / 必备技能 / 加分技能 / 职责 / 要求 / 关键词。强调 role_title 和 seniority_level 不能为 null。占位符 `{jd_text}`
-- `FIX_JSON_PROMPT` — JSON 修复提示词。占位符 `{raw_text}`
-- `analyze_jd(jd_text: str, max_retries: int = 2) -> JobDescription` — **主函数**。分析 JD 文本并返回结构化 `JobDescription`
-- `analyze_jd_from_url(url: str) -> JobDescription` — 便捷函数。先调 `fetch_jd_from_url` 再调 `analyze_jd`
+- `JD_EXTRACTION_PROMPT` — 模板。占位符 `{jd_text}`
+- `FIX_JSON_PROMPT` — 修复模板。占位符 `{raw_text}`
+- `analyze_jd(jd_text, max_retries=2) -> JobDescription` — **主函数**
+- `analyze_jd_from_url(url) -> JobDescription` — 先调 `fetch_jd_from_url` 再调 `analyze_jd`
 
 ### backend/agents/ats_scorer.py
 
 **ATS 评分 Agent**。模型：`qwen-plus`（重试用 `qwen-plus`）。
 
-- `ATS_SCORING_PROMPT` — 提示词模板。对比简历 JSON 和 JD JSON，输出评分 / 匹配技能 / 缺失技能 / 四维拆解 / 理由 / 建议。占位符 `{resume_json}` 和 `{jd_json}`
-- `FIX_JSON_PROMPT` — JSON 修复提示词。占位符 `{raw_text}`
-- `score_ats(resume: Resume, jd: JobDescription, max_retries: int = 2) -> ATSScore` — **主函数**。将 Resume 和 JobDescription 序列化为 JSON，调用 Qwen 评分。包含嵌套对象（MatchedSkill、MissingSkill、SkillBreakdown）的规范化处理
+- `ATS_SCORING_PROMPT` — 模板。占位符 `{resume_json}` `{jd_json}`
+- `FIX_JSON_PROMPT` — 修复模板。占位符 `{raw_text}`
+- `score_ats(resume, jd, max_retries=2) -> ATSScore` — **主函数**。含 MatchedSkill / MissingSkill / SkillBreakdown 嵌套对象规范化
 
 ### backend/agents/rewrite_agent.py
 
 **简历改写 Agent**。模型：`qwen-plus`（重试用 `qwen-plus`）。
 
-- `REWRITE_PROMPT` — 提示词模板。基于简历 + JD + ATS 分析，输出改写后的 bullet（含 before/after）、优化后个人简介、技能缺口补救计划。占位符 `{resume_json}` `{jd_json}` `{ats_json}`
-- `FIX_JSON_PROMPT` — JSON 修复提示词。占位符 `{raw_text}`
-- `rewrite_resume(resume: Resume, jd: JobDescription, ats: ATSScore, max_retries: int = 2) -> RewrittenResume` — **主函数**。生成 ATS 优化建议。规则：不编造经历、自然融入关键词、量化成果、用有力动词
+- `REWRITE_PROMPT` — 模板。占位符 `{resume_json}` `{jd_json}` `{ats_json}`
+- `FIX_JSON_PROMPT` — 修复模板。占位符 `{raw_text}`
+- `rewrite_resume(resume, jd, ats, max_retries=2) -> RewrittenResume` — **主函数**
 
 ### backend/agents/interview_agent.py
 
 **面试题生成 Agent**。模型：`qwen-plus`（重试用 `qwen-plus`）。
 
-- `INTERVIEW_PROMPT` — 提示词模板。生成 4 类面试题（行为 / 技术 / 情景 / 缺口探测）+ 追问策略。全部中文输出。占位符 `{resume_json}` `{jd_json}` `{ats_json}`
-- `FIX_JSON_PROMPT` — JSON 修复提示词。占位符 `{raw_text}`
-- `_normalize_questions(data: dict, key: str) -> list[InterviewQuestion]` — 将 JSON 字典列表转换为 `InterviewQuestion` 对象列表
-- `generate_interview_questions(resume: Resume, jd: JobDescription, ats: ATSScore, max_retries: int = 2) -> InterviewQuestions` — **主函数**。生成全套面试题
+- `INTERVIEW_PROMPT` — 模板。占位符 `{resume_json}` `{jd_json}` `{ats_json}`
+- `FIX_JSON_PROMPT` — 修复模板。占位符 `{raw_text}`
+- `_normalize_questions(data, key) -> list[InterviewQuestion]` — JSON 字典列表 → InterviewQuestion 对象
+- `generate_interview_questions(resume, jd, ats, max_retries=2) -> InterviewQuestions` — **主函数**
 
 ---
 
@@ -330,7 +349,7 @@ LangGraph 工作流图定义。**两层并行执行。**
 
 ### backend/api/main.py
 
-FastAPI 应用主文件。配置 CORS 中间件（允许 localhost:3000 / 3001），注册调试路由。
+FastAPI 应用主文件。配置 CORS 中间件（正则匹配 localhost / 127.0.0.1 / 10.x.x.x / 192.168.x.x），注册调试路由。
 
 - `startup()` — 启动事件。校验配置，打印日志
 - `root()` — `GET /` — 返回服务信息

@@ -1,22 +1,36 @@
 import logging
-import json
+import os
 import time
 from datetime import datetime, timezone
 from functools import wraps
+from pathlib import Path
 from typing import Callable
+
+LOG_DIR = Path(os.getenv("LOG_DIR", Path(__file__).parent.parent.parent / "logs"))
+LOG_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def setup_logger(name: str) -> logging.Logger:
     logger = logging.getLogger(name)
     if not logger.handlers:
-        handler = logging.StreamHandler()
-        handler.setFormatter(
-            logging.Formatter(
-                "%(asctime)s | %(levelname)-7s | %(name)s | %(message)s",
-                datefmt="%Y-%m-%d %H:%M:%S",
-            )
+        fmt = logging.Formatter(
+            "%(asctime)s | %(levelname)-7s | %(name)s | %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S",
         )
-        logger.addHandler(handler)
+
+        # 终端输出
+        console = logging.StreamHandler()
+        console.setFormatter(fmt)
+        logger.addHandler(console)
+
+        # 文件输出（按日期滚动）
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        file_handler = logging.FileHandler(
+            LOG_DIR / f"app-{today}.log", encoding="utf-8"
+        )
+        file_handler.setFormatter(fmt)
+        logger.addHandler(file_handler)
+
         logger.setLevel(logging.INFO)
     return logger
 

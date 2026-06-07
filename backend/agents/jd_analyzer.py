@@ -2,11 +2,12 @@ import json
 import re
 from typing import Optional
 
-import dashscope
-from dashscope import Generation
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.output_parsers import StrOutputParser
 
 from backend.core.config import settings
 from backend.core.logger import setup_logger, log_agent_execution
+from backend.agents.llm import DashScopeChatModel
 from backend.schemas.jd import JobDescription
 
 logger = setup_logger("agent.jd_analyzer")
@@ -62,58 +63,29 @@ def _extract_json_from_text(text: str) -> Optional[dict]:
         return json.loads(text)
     except json.JSONDecodeError:
         pass
-
     match = re.search(r"```(?:json)?\s*([\s\S]*?)```", text)
     if match:
         try:
             return json.loads(match.group(1).strip())
         except json.JSONDecodeError:
             pass
-
     match = re.search(r"\{[\s\S]*\}", text)
     if match:
         try:
             return json.loads(match.group(0))
         except json.JSONDecodeError:
             pass
-
     return None
-
-
-def _call_qwen(prompt: str, model: str | None = None) -> str:
-    dashscope.api_key = settings.DASHSCOPE_API_KEY
-    model = model or settings.MODEL_NAME
-
-    response = Generation.call(
-        model=model,
-        messages=[{"role": "user", "content": prompt}],
-        result_format="message",
-    )
-
-    if response.status_code != 200:
-        raise RuntimeError(
-            f"DashScope API error: code={response.code}, message={response.message}"
-        )
-
-    return response.output.choices[0].message.content
 
 
 @log_agent_execution("jd_analyzer")
 def analyze_jd(jd_text: str, max_retries: int = 2) -> JobDescription:
-    """
-    Analyze a job description and extract structured data using Qwen.
-
-    Args:
-        jd_text: Raw text of the job description.
-        max_retries: Maximum retries for JSON parsing failures.
-
-    Returns:
-        Validated JobDescription Pydantic object.
-    """
     text = jd_text[:12000]
 
-    prompt = JD_EXTRACTION_PROMPT.format(jd_text=text)
-    raw_output = _call_qwen(prompt, model=settings.MODEL_NAME_SIMPLE)
+    model = DashScopeChatModel(model=settings.MODEL_NAME_SIMPLE, temperature=0.1)
+    chain = ChatPromptTemplate.from_template(JD_EXTRACTION_PROMPT) | model | StrOutputParser()
+
+    raw_output = chain.invoke({"jd_text": text})
     logger.info("Qwen response received, length=%d", len(raw_output))
 
     data = _extract_json_from_text(raw_output)
@@ -122,14 +94,13 @@ def analyze_jd(jd_text: str, max_retries: int = 2) -> JobDescription:
         if data is not None:
             break
         logger.warning("JSON parse failed, retry %d/%d", attempt + 1, max_retries)
-        fix_prompt = FIX_JSON_PROMPT.format(raw_text=raw_output)
-        raw_output = _call_qwen(fix_prompt, model=settings.MODEL_NAME)
+        fix_model = DashScopeChatModel(model=settings.MODEL_NAME, temperature=0.1)
+        fix_chain = ChatPromptTemplate.from_template(FIX_JSON_PROMPT) | fix_model | StrOutputParser()
+        raw_output = fix_chain.invoke({"raw_text": raw_output})
         data = _extract_json_from_text(raw_output)
 
     if data is None:
-        raise ValueError(
-            f"Failed to parse JSON from Qwen output after {max_retries} retries"
-        )
+        raise ValueError(f"Failed to parse JSON from Qwen output after {max_retries} retries")
 
     jd = JobDescription(**data)
     jd.raw_text = jd_text
@@ -138,8 +109,6 @@ def analyze_jd(jd_text: str, max_retries: int = 2) -> JobDescription:
 
 @log_agent_execution("jd_analyzer_from_url")
 def analyze_jd_from_url(url: str) -> JobDescription:
-    """Fetch a JD from a URL and analyze it."""
     from backend.tools.jd_fetcher import fetch_jd_from_url
-
     text = fetch_jd_from_url(url)
     return analyze_jd(text)
